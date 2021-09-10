@@ -60,11 +60,16 @@ class EstateModel(models.Model):
     def totalareasqm(self):
         for rec in self:
             rec.tasqm = 0
-            rec.gasqm = 0
             if rec.gasqm:
-                rec.tasqm = rec.mapped(lambda x: x.lasqm + x.gasqm)
+                var = rec.mapped(lambda x: x.lasqm + x.gasqm)
+                _logger.info("=========Search==========%r---------------------",var)
+                rec.write({
+                    "tasqm" : var[0],
+                })
             else:
-                rec.tasqm = rec.lasqm           
+                rec.write({
+                    "tasqm":rec.lasqm,
+                })           
 
     @api.constrains("title")
     def _checktitle_(self):
