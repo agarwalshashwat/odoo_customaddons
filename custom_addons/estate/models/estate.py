@@ -15,7 +15,7 @@ class EstateModel(models.Model):
     ptype = fields.Selection([('Condo','Condo'),('Apartment','Apartment')], string="Property Type",required=True)
     pcode = fields.Char(string="Postal Code",required=True)
     room = fields.Integer(string='Bedrooms')
-    lasqm = fields.Integer(string='Living Area(sqm)')
+    lasqm = fields.Float(string='Living Area(sqm)',required=True)
     exp = fields.Float(string='Expected Price',required=True)
     sp = fields.Float(compute="sellvalue",string='Selling Price')
     state = fields.Selection([('nfs','Not For Sale'),('offer_received','Offer Received'),('offer_accepted','Offer Accepted'),('sold','Sold')], string='State', default='nfs')
@@ -25,10 +25,11 @@ class EstateModel(models.Model):
 
     desc = fields.Text(string="Description")
     desc_count = fields.Integer(compute='descr_count', string="Description Count",store=True)
-    fasc = fields.Boolean(string="Fascades")
+    fasc = fields.Integer(string="Fascades")
     garg = fields.Boolean(string="Garage")
     gard = fields.Boolean(string="Garden")
-    tasqm = fields.Float(string="Total Area(sqm)")
+    tasqm = fields.Float(compute="totalareasqm",string="Total Area(sqm)")
+    gasqm = fields.Float(string="Garden Area(sqm)")
 
     buy = fields.One2many(comodel_name='estate.offers',inverse_name="buy_fetch",string="Buyer")
 
@@ -53,7 +54,17 @@ class EstateModel(models.Model):
             for offer in rec.buy:
                 # _logger.info("=========Search==========%r---------------------",offer.offer)
                 if offer.state == "Accepted":
-                    rec.sp = offer.offer           
+                    rec.sp = offer.offer
+
+    @api.depends("lasqm","gasqm")
+    def totalareasqm(self):
+        for rec in self:
+            rec.tasqm = 0
+            rec.gasqm = 0
+            if rec.gasqm:
+                rec.tasqm = rec.mapped(lambda x: x.lasqm + x.gasqm)
+            else:
+                rec.tasqm = rec.lasqm           
 
     @api.constrains("title")
     def _checktitle_(self):
@@ -61,6 +72,16 @@ class EstateModel(models.Model):
             objs = self.search([("title",'=',rec.title),("id", "!=", self.id)])
             if objs:
                 raise ValidationError(_("You cannot create two different profiles for the same property."))
+
+    def action_negotiate(self): 
+        for rec in self:
+            if rec.buy:
+                non_negotiating_offers = rec.buy.filtered(lambda x:x.state != "Negotating")
+                if non_negotiating_offers:
+                    non_negotiating_offers.write({
+                        "state":"Negotiating"
+                    })
+
             
 
     @api.onchange("garg","gard","fasc")
@@ -68,22 +89,14 @@ class EstateModel(models.Model):
         # prev = self.desc
         # prev_ind = prev.index("The property")-1
         # prev = prev[:prev_ind] + " "
-        if self.garg & self.gard & self.fasc:
-            self.desc = "The property has Garage, Garden and Fascades."
-        elif self.garg & self.gard:
+        if self.garg & self.gard:
             self.desc = "The property has Garage and Garden only."
-        elif self.garg & self.fasc:
-            self.desc = "The property has Garage and Fascades only."
-        elif self.gard & self.fasc:
-            self.desc = "The property has Garden and Fascades only."
         elif self.gard:
             self.desc = "The property has Garden only."
         elif self.garg:
             self.desc = "The property has Garage only."
-        elif self.fasc:
-            self.desc = "The property has Fascade only."
         else:
-            self.desc = "The property doesn't has Garage, Garden and Fascades facility."
+            self.desc = "The property doesn't has Garage and Garden facility."
 
 
     @api.depends("desc")
@@ -157,6 +170,7 @@ class EstateModelDescription(models.Model):
     _description = "Estate Model Tags"
 
     name = fields.Char(string="Description")
+    color = fields.Integer()
 
 class EstateOffers(models.Model):
     _name = "estate.offers"
@@ -167,6 +181,7 @@ class EstateOffers(models.Model):
     offer = fields.Float(string="Offer")
     state = fields.Selection([('Accepted','Accepted'),('Negotiating','Negotiating'),('Refused','Refused')],string="Status",required=True,default="Negotiating")
     prop_id = fields.Integer(related="buy_fetch.id", string="Property ID")
+    # main_state = fields.Char()
 
     @api.constrains("state","buy_fetch")
     def _checkofferstatus_(self):
@@ -178,15 +193,22 @@ class EstateOffers(models.Model):
                 raise ValidationError(_("You cannot accept mutiple offers."))
 
     def action_accept(self):
-        self.state = "Accepted"
         self.buy_fetch.state = "offer_accepted" 
         for rec in self:
-            objs = self.search([("id","!=",rec.id)])
+            objs = self.search([("id","!=",rec.id),("buy_fetch.id","=",rec.buy_fetch.id)])
+            var = rec.buy_fetch.buy
             if objs:
                 objs.write({
                     "state":"Refused"
                 })
+        self.state = "Accepted"
 
-    # def action_negotiate(self):
+    # @api.constrains("main_state","buy_fetch")
+    # def _checkofferstatus_(self):
     #     for rec in self:
-    #         rec.state = "Negotiating"
+    #         objs = self.search([("buy_fetch.id","=",rec.buy_fetch.id)])
+    #         if rec.buy_fetch.state == "sold":
+    #             _logger.info("=========Search==========%r---------------------",rec.buy_fetch.state)
+    #             objs.write({
+    #                 "main_state" : "sold",
+    #             })
