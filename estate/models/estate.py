@@ -143,6 +143,7 @@ class EstateModel(models.Model):
                 "type": self.ptype,
                 "intro": self.desc,
             })
+            
     def delete_profile(self):
         obj = self.env['estate.model.sub'].search([('sub_id','=',self.id)])
         if obj:
